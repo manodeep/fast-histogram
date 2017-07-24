@@ -179,7 +179,7 @@ static int _hist1d_no_if_pointer_ops(double * restrict x, const long n, const do
 }
 
 #define GETCOND(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax) ? 1:0
-#define GETIDX(n)  const long ix##n = cond##n ? ((long) ((*x - xmin) * postfac)):0
+#define GETIDX(n)  const long ix##n = cond##n ? ((long) ((*(x + n) - xmin) * postfac)):0
 #define INCR(n)   count[ix##n] += cond##n
 
 static int _hist1d_no_if_pointer_ops_unroll_2(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
@@ -254,7 +254,7 @@ static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n,
 #define ALLOCATEHIST_n(n, nx) long *count##n = calloc(nx, sizeof(*(count##n)))
 #define CHECKHIST_AND_RETURN_ERROR(n) {if(count##n == NULL) return -1;}
 #define GETCOND_n(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax) 
-#define GETIDX_n(n)  const long ix##n = ((long) ((*x - xmin) * postfac))  * cond##n
+#define GETIDX_n(n)  const long ix##n = ((long) ((*(x + n) - xmin) * postfac))  * cond##n
 #define INCR_n(n)   count##n[ix##n] += cond##n
 #define FREEHIST_n(n) free(count##n)
 
