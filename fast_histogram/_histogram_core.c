@@ -59,7 +59,8 @@ static PyObject *_histogram1d(PyObject *self, PyObject *args)
     double xmin, xmax, tx, fnx, normx;
     PyObject *x_obj, *x_array, *count_array;
     npy_intp dims[1];
-    double *x, *count;
+    double *x;
+    long *count;
 
     /* Parse the input tuple */
     if (!PyArg_ParseTuple(args, "Oidd", &x_obj, &nx, &xmin, &xmax)) {
@@ -82,7 +83,7 @@ static PyObject *_histogram1d(PyObject *self, PyObject *args)
 
     /* Build the output array */
     dims[0] = nx;
-    count_array = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    count_array = PyArray_SimpleNew(1, dims, NPY_INT64);
     if (count_array == NULL) {
         PyErr_SetString(PyExc_TypeError, "Couldn't build output array");
         Py_DECREF(x_array);
@@ -95,7 +96,7 @@ static PyObject *_histogram1d(PyObject *self, PyObject *args)
     /* Get pointers to the data as C-types. */
 
     x = (double*)PyArray_DATA(x_array);
-    count = (double*)PyArray_DATA(count_array);
+    count = (long *)PyArray_DATA(count_array);
 
     fnx = nx;
     normx = 1. / (xmax - xmin);
@@ -119,7 +120,7 @@ static PyObject *_histogram1d(PyObject *self, PyObject *args)
 }
 
 
-static int _hist1d_base(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_base(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const double fnx = nx;
@@ -128,13 +129,13 @@ static int _hist1d_base(double * restrict x, const long n, const double xmin, co
         double tx = x[i];
         if (tx >= xmin && tx < xmax) {
             const long ix = (long) ((tx - xmin) * normx * fnx);
-            count[ix] += 1.;
+            count[ix]++;
         }
     }
     return EXIT_SUCCESS;
 }
 
-static int _hist1d_pointer_ops(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_pointer_ops(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const double fnx = nx;
@@ -142,14 +143,14 @@ static int _hist1d_pointer_ops(double * restrict x, const long n, const double x
     for(i = 0; i < n; i++) {
         if (*x >= xmin && *x < xmax) {
             const long ix = (long) ((*x - xmin) * normx * fnx);
-            count[ix] += 1.;
+            count[ix]++;
         }
         x++;
     }
     return EXIT_SUCCESS;
 }
 
-static int _hist1d_no_if(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const double fnx = nx;
@@ -158,13 +159,12 @@ static int _hist1d_no_if(double * restrict x, const long n, const double xmin, c
         double tx = x[i];
         const long cond = (tx >= xmin) && (tx < xmax);
         const long ix = ((long) ((tx - xmin) * normx * fnx))  * cond;
-        const double incr = 1.0 * cond;
-        count[ix] += incr;
+        count[ix] += cond;
     }
     return EXIT_SUCCESS;
 }
 
-static int _hist1d_no_if_pointer_ops(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if_pointer_ops(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const double fnx = nx;
@@ -172,33 +172,31 @@ static int _hist1d_no_if_pointer_ops(double * restrict x, const long n, const do
     for(i = 0; i < n; i++) {
         const long cond = (*x >= xmin) && (*x < xmax);
         const long ix = ((long) ((*x - xmin) * normx * fnx))  * cond;
-        const double incr = 1.0 * cond;
-        count[ix] += incr;
+        count[ix] += cond;
         x++;
     }
     return EXIT_SUCCESS;
 }
 
-#define GETCOND(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax)
-#define GETIDX(n)  const long ix##n = ((long) ((*x - xmin) * normx * fnx))  * cond##n
-#define GETINCR(n) const double incr##n = 1.0 * cond##n
-#define INCR(n)   count[ix##n] += incr##n
+#define GETCOND(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax) ? 1:0
+#define GETIDX(n)  const long ix##n = cond##n ? ((long) ((*x - xmin) * postfac)):0
+#define INCR(n)   count[ix##n] += cond##n
 
-static int _hist1d_no_if_pointer_ops_unroll_2(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if_pointer_ops_unroll_2(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     const long unroll_fac=2;
     long i;
     const double fnx = nx;
     const double normx = 1. / (xmax - xmin);
+    const double postfac = fnx * normx;
+    
     for(i = 0; i <= (n-unroll_fac); i+=unroll_fac) {
         GETCOND(0);
         GETIDX(0);
-        GETINCR(0);
         INCR(0);
         
         GETCOND(1);
         GETIDX(1);
-        GETINCR(1);
         INCR(1);
 
         x += unroll_fac;
@@ -212,31 +210,29 @@ static int _hist1d_no_if_pointer_ops_unroll_2(double * restrict x, const long n,
     return EXIT_SUCCESS;
 }
 
-static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     const long unroll_fac=4;
     long i;
     const double fnx = nx;
     const double normx = 1. / (xmax - xmin);
+    const double postfac = fnx * normx;
+    
     for(i = 0; i <= (n-unroll_fac); i+=unroll_fac) {
         GETCOND(0);
         GETIDX(0);
-        GETINCR(0);
         INCR(0);
         
         GETCOND(1);
         GETIDX(1);
-        GETINCR(1);
         INCR(1);
 
         GETCOND(2);
         GETIDX(2);
-        GETINCR(2);
         INCR(2);
 
         GETCOND(3);
         GETIDX(3);
-        GETINCR(3);
         INCR(3);
         
         x += unroll_fac;
@@ -255,20 +251,20 @@ static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n,
 #undef GETINCR
 #undef INCR
 
-#define ALLOCATEHIST_n(n, nx) long *count##n = malloc(sizeof(*(count##n))*nx)
+#define ALLOCATEHIST_n(n, nx) long *count##n = calloc(nx, sizeof(*(count##n)))
 #define CHECKHIST_AND_RETURN_ERROR(n) {if(count##n == NULL) return -1;}
-#define GETCOND_n(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax)
-#define GETIDX_n(n)  const long ix##n = ((long) ((*x - xmin) * normx * fnx))  * cond##n
-#define GETINCR_n(n) const double incr##n = 1.0 * cond##n
-#define INCR_n(n)   count##n[ix##n] += incr##n
+#define GETCOND_n(n) const long cond##n = (*(x + n) >= xmin && *(x + n) < xmax) 
+#define GETIDX_n(n)  const long ix##n = ((long) ((*x - xmin) * postfac))  * cond##n
+#define INCR_n(n)   count##n[ix##n] += cond##n
 #define FREEHIST_n(n) free(count##n)
 
-static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     const long unroll_fac=2;
     long i;
     const double fnx = nx;
     const double normx = 1. / (xmax - xmin);
+    const double postfac = normx * fnx;
 
     ALLOCATEHIST_n(0, nx);
     ALLOCATEHIST_n(1, nx);
@@ -279,12 +275,10 @@ static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x,
     for(i = 0; i <= (n-unroll_fac); i+=unroll_fac) {
         GETCOND_n(0);
         GETIDX_n(0);
-        GETINCR_n(0);
         INCR_n(0);
         
         GETCOND_n(1);
         GETIDX_n(1);
-        GETINCR_n(1);
         INCR_n(1);
 
         x += unroll_fac;
@@ -305,13 +299,14 @@ static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x,
 }
 
 
-static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     const long unroll_fac=4;
     long i;
     const double fnx = nx;
     const double normx = 1. / (xmax - xmin);
-
+    const double postfac = normx * fnx;
+    
     ALLOCATEHIST_n(0, nx);
     ALLOCATEHIST_n(1, nx);
     ALLOCATEHIST_n(2, nx);
@@ -325,14 +320,20 @@ static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x,
     for(i = 0; i <= (n-unroll_fac); i+=unroll_fac) {
         GETCOND_n(0);
         GETIDX_n(0);
-        GETINCR_n(0);
         INCR_n(0);
         
         GETCOND_n(1);
         GETIDX_n(1);
-        GETINCR_n(1);
         INCR_n(1);
 
+        GETCOND_n(2);
+        GETIDX_n(2);
+        INCR_n(2);
+
+        GETCOND_n(3);
+        GETIDX_n(3);
+        INCR_n(3);
+        
         x += unroll_fac;
     }
 
@@ -354,7 +355,6 @@ static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x,
 
 #undef GETCOND_n
 #undef GETIDX_n
-#undef GETINCR_n
 #undef INCR_n
 #undef CHECKHIST_AND_RETURN_ERROR
 #undef ALLOCATEHIST_n
@@ -363,11 +363,11 @@ static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x,
 #define UPDATEHIST(n) {                                                 \
         if(tx##n >= xmin && tx##n < xmax) {                             \
             const long ix = (long) ((tx##n - xmin) * normx * fnx);      \
-            count[ix] += 1.0;                                        \
-        }                                                            \
+            count[ix]++;                                                \
+        }                                                               \
     }
 
-static int _hist1d_base_unroll_2(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_base_unroll_2(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const long unroll_fac=2;
@@ -390,7 +390,7 @@ static int _hist1d_base_unroll_2(double * restrict x, const long n, const double
     return EXIT_SUCCESS;
 }
 
-static int _hist1d_base_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_base_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const long unroll_fac=4;
@@ -424,24 +424,26 @@ static int _hist1d_base_unroll_4(double * restrict x, const long n, const double
 
 
 
-#define ALLOCATEHIST(n, nx) long *count##n = malloc(sizeof(*(count##n))*nx)
+#define ALLOCATEHIST(n, nx) long *count##n = calloc(nx, sizeof(*(count##n)))
 #define CHECKHIST_AND_RETURN_ERROR(n) {if(count##n == NULL) return -1;}
 #define GETVAL_n(n)  const double tx##n = *(x + n)
 #define UPDATEHIST_n(n) {                                               \
         if(tx##n >= xmin && tx##n < xmax) {                             \
-            const long ix = (long) ((tx##n - xmin) * normx * fnx);      \
-            count##n[ix] += 1.0;                                        \
+            const long ix = (long) ((tx##n - xmin) * postfac);          \
+            count##n[ix]++;                                             \
         }                                                               \
     }
 #define FREEHIST(n) free(count##n)
 
 
-static int _hist1d_base_unroll_4_indp_hist(double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count)
+static int _hist1d_base_unroll_4_indp_hist(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
 {
     long i;
     const long unroll_fac=4;
     const double fnx = nx;
     const double normx = 1. / (xmax - xmin);
+    const double postfac = fnx * normx;
+    
     ALLOCATEHIST(0, nx);
     ALLOCATEHIST(1, nx);
     ALLOCATEHIST(2, nx);
@@ -492,33 +494,34 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
     double xmin, xmax;
     PyObject *x_obj, *x_array, *count_array;
     npy_intp dims[1];
-    double *x, *count;
+    double *x;
+    long *count;
 
-    int (*allfunctions[]) (double * restrict x, const long n, const double xmin, const double xmax, const long nx, double * restrict count) =
+    int (*allfunctions[]) (double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count) =
         {_hist1d_base,
+         _hist1d_base_unroll_2,
+         _hist1d_base_unroll_4,
+         _hist1d_base_unroll_4_indp_hist,
          _hist1d_pointer_ops,
          _hist1d_no_if,
          _hist1d_no_if_pointer_ops,
          _hist1d_no_if_pointer_ops_unroll_2,
          _hist1d_no_if_pointer_ops_unroll_2_indp_counters,
          _hist1d_no_if_pointer_ops_unroll_4,
-         _hist1d_no_if_pointer_ops_unroll_4_indp_counters,
-         _hist1d_base_unroll_2,
-         _hist1d_base_unroll_4,
-         _hist1d_base_unroll_4_indp_hist
+         _hist1d_no_if_pointer_ops_unroll_4_indp_counters
         };
 #define MAXLEN 1024    
     const char function_names[][MAXLEN] = {"base",
-                                           "pointers",
-                                           "No branching",
-                                           "No branching and pointers",
-                                           "No branching and pointers (unroll 2)",
-                                           "No branching and pointers (unroll 2, 2 indp counters)",
-                                           "No branching and pointers (unroll 4)",
-                                           "No branching and pointers (unroll 4, 4 indp counters)",
                                            "base (unroll 2)",
                                            "base (unroll 4)",
-                                           "base (unroll 4, 4 indp counters)"};
+                                           "base (unroll 4, indp)",
+                                           "pointers",
+                                           "No branching",
+                                           "No branching, pointers",
+                                           "No branching, pointers (unroll 2)",
+                                           "No branching, pointers (unroll 2, indp))",
+                                           "No branching, pointers (unroll 4)",
+                                           "No branching, pointers (unroll 4, indp)"};
                                      
     const int numfunctions = sizeof(allfunctions)/sizeof(void *);
     assert(numfunctions == 9);
@@ -545,7 +548,7 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
 
     /* Build the output array */
     dims[0] = nx;
-    count_array = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    count_array = PyArray_SimpleNew(1, dims, NPY_INT64);
     if (count_array == NULL) {
         PyErr_SetString(PyExc_TypeError, "Couldn't build output array");
         Py_DECREF(x_array);
@@ -558,41 +561,75 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
     /* Get pointers to the data as C-types. */
 
     x = (double*)PyArray_DATA(x_array);
-    count = (double*)PyArray_DATA(count_array);
-    
-    
+    count = (long*)PyArray_DATA(count_array);
+
+    long *goodhist = calloc(nx, sizeof(*goodhist));
+    assert(goodhist != NULL);
+
+    volatile int ret = _hist1d_base(x, n, xmin, xmax, nx, goodhist);
 
 #define ADD_DIFF_TIME(t0, t1)  (t1.tv_sec - t0.tv_sec) + 1e-6*(t1.tv_usec - t0.tv_usec) 
     
     /* Now call the actual function based on the 'key' passed */
-    int j;
-    int k;
+    long i;
+    int j, k;
 
     const int maxtries=10;
+
+    fprintf(stdout,"#################################################################################################################\n");
+    fprintf(stdout,"#          FUNCTION                              Ntries         Avg_time           Sigma_time         Best_time  \n");
+    fprintf(stdout,"#################################################################################################################\n");
     for(j=0; j<numfunctions;j++) {
-        double avg_time=0.0, best_time=1e48;
-        for(k=0;k<maxtries;k++) {
-            struct timeval t0;
-            gettimeofday(&t0, NULL);
-            volatile int ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
-            struct timeval t1;
-            gettimeofday(&t1, NULL);
-            if(ret != EXIT_SUCCESS) {
-                PyErr_SetString(PyExc_TypeError, "Couldn't compute histogram");
-                Py_DECREF(count_array);
-                return NULL;
-            }
-            double this_iter_time = ADD_DIFF_TIME(t0, t1);
-            avg_time += this_iter_time;
-            best_time = (this_iter_time < best_time) ? this_iter_time:best_time;
+        double avg_time=0.0, best_time=1e48, squared_time=0.0;
+        for(i=0;i<nx;i++) {
+            count[i] = 0;
         }
-        avg_time /= maxtries;
-        fprintf(stderr, "Function = %s took (avg) = %14.8g (best) = %14.8g seconds\n", function_names[j], avg_time, best_time);
+
+        int pass=0;
+        volatile int ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
+        int failedbin=0;
+        for(i=0;i<nx;i++) {
+            if(goodhist[i] != count[i]) {
+                fprintf(stderr,"Error: In %s> goodhist[%ld] = %ld count[%ld] = %ld\n",
+                        function_names[j], i, goodhist[i], i, count[i]);
+                failedbin++;
+            }
+        }
+            
+        if(failedbin == 0) {
+            pass = 1;
+        }
+
+        pass=1;
+        if(pass == 1) {
+            for(k=0;k<maxtries;k++) {
+                struct timeval t0;
+                gettimeofday(&t0, NULL);
+                volatile int ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
+                struct timeval t1;
+                gettimeofday(&t1, NULL);
+                if(ret != EXIT_SUCCESS) {
+                    PyErr_SetString(PyExc_TypeError, "Couldn't compute histogram");
+                    Py_DECREF(count_array);
+                    return NULL;
+                }
+                double this_iter_time = ADD_DIFF_TIME(t0, t1);
+                avg_time += this_iter_time;
+                squared_time += (this_iter_time*this_iter_time);
+                best_time = (this_iter_time < best_time) ? this_iter_time:best_time;
+            }
+            avg_time /= maxtries;
+            const double sigma_time = sqrt(squared_time/maxtries - avg_time*avg_time); //sigma_x = sqrt( mean(x^2)  - (mean(x))^2)
+            fprintf(stdout, "%-40s   %10d    %14.4lf     %14.4lf     %14.4lf\n", function_names[j], maxtries, avg_time, sigma_time, best_time);
+        } else {
+            fprintf(stderr,"Error: Function = %s output did not match the expected correct output...skipping timing tests\n", function_names[j]);
+        }
     }
 
     /* Clean up. */
     Py_DECREF(x_array);
 
+    free(goodhist);
     
     return count_array;
 
