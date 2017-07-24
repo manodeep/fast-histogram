@@ -577,7 +577,7 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
     const int maxtries=10;
 
     fprintf(stdout,"#################################################################################################################\n");
-    fprintf(stdout,"#          FUNCTION                              Ntries         Avg_time           Sigma_time         Best_time  \n");
+    fprintf(stdout,"#          FUNCTION                         Npoints (x10^6)     Avg_time           Sigma_time         Best_time  \n");
     fprintf(stdout,"#################################################################################################################\n");
     for(j=0; j<numfunctions;j++) {
         double avg_time=0.0, best_time=1e48, squared_time=0.0;
@@ -620,7 +620,7 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
             }
             avg_time /= maxtries;
             const double sigma_time = sqrt(squared_time/maxtries - avg_time*avg_time); //sigma_x = sqrt( mean(x^2)  - (mean(x))^2)
-            fprintf(stdout, "%-40s   %10d    %14.4lf     %14.4lf     %14.4lf\n", function_names[j], maxtries, avg_time, sigma_time, best_time);
+            fprintf(stdout, "%-40s   %10d    %14.4lf     %14.4lf     %14.4lf\n", function_names[j], n/1000000, avg_time, sigma_time, best_time);
         } else {
             fprintf(stderr,"Error: Function = %s output did not match the expected correct output...skipping timing tests\n", function_names[j]);
         }
