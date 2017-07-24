@@ -4,9 +4,9 @@ import numbers
 
 import numpy as np
 
-from ._histogram_core import _histogram1d, _histogram2d
+from ._histogram_core import _histogram1d, _histogram2d, _histogram1d_wrapper
 
-__all__ = ['histogram1d', 'histogram2d']
+__all__ = ['histogram1d', 'histogram1d_wrapper', 'histogram2d']
 
 
 def histogram1d(x, bins, range):
@@ -46,6 +46,45 @@ def histogram1d(x, bins, range):
     x = np.ascontiguousarray(x, np.float)
 
     return _histogram1d(x, nx, xmin, xmax)
+
+
+def histogram1d_wrapper(x, bins, range):
+    """
+    Compute a 1D histogram assuming equally spaced bins.
+
+    Parameters
+    ----------
+    x : `~numpy.ndarray`
+        The position of the points to bin in the 1D histogram
+    bins : int
+        The number of bins
+    range : iterable
+        The range as a tuple of (xmin, xmax)
+
+    Returns
+    -------
+    array : `~numpy.ndarray`
+        The 1D histogram array
+    """
+
+    nx = bins
+    xmin, xmax = range
+
+    if not np.isfinite(xmin):
+        raise ValueError("xmin should be finite")
+
+    if not np.isfinite(xmax):
+        raise ValueError("xmax should be finite")
+
+    if xmax <= xmin:
+        raise ValueError("xmax should be greater than xmin")
+
+    if nx <= 0:
+        raise ValueError("nx should be strictly positive")
+
+    x = np.ascontiguousarray(x, np.float)
+
+    return _histogram1d_wrapper(x, nx, xmin, xmax)
 
 
 def histogram2d(x, y, bins, range):
