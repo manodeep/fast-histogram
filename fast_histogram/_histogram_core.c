@@ -40,6 +40,10 @@ static PyMethodDef module_methods[] = {
           ob = Py_InitModule3(name, methods, doc);
 #endif
 
+
+#define ADD_DIFF_TIME(t0, t1)  (t1.tv_sec - t0.tv_sec) + 1e-6*(t1.tv_usec - t0.tv_usec) 
+
+
 MOD_INIT(_histogram_core)
 {
     PyObject *m;
@@ -84,6 +88,7 @@ static PyObject *_histogram1d(PyObject *self, PyObject *args)
     /* Build the output array */
     dims[0] = nx;
     count_array = PyArray_SimpleNew(1, dims, NPY_INT64);
+    
     if (count_array == NULL) {
         PyErr_SetString(PyExc_TypeError, "Couldn't build output array");
         Py_DECREF(x_array);
@@ -202,12 +207,13 @@ static int _hist1d_no_if_pointer_ops_unroll_2(double * restrict x, const long n,
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
     }
 
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
@@ -238,12 +244,13 @@ static int _hist1d_no_if_pointer_ops_unroll_4(double * restrict x, const long n,
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
     }
 
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 #undef GETCOND
@@ -284,8 +291,9 @@ static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x,
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
     }
 
     for(i=0;i<nx;i++) {
@@ -295,7 +303,7 @@ static int _hist1d_no_if_pointer_ops_unroll_2_indp_counters(double * restrict x,
     FREEHIST_n(0);
     FREEHIST_n(1);
     
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 
@@ -337,8 +345,9 @@ static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x,
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_no_if_pointer_ops(x, n-i, xmin, xmax, nx, count);
     }
 
     for(i=0;i<nx;i++) {
@@ -349,7 +358,7 @@ static int _hist1d_no_if_pointer_ops_unroll_4_indp_counters(double * restrict x,
     FREEHIST_n(2);
     FREEHIST_n(3);
     
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 
@@ -383,11 +392,12 @@ static int _hist1d_base_unroll_2(double * restrict x, const long n, const double
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
     }
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 static int _hist1d_base_unroll_4(double * restrict x, const long n, const double xmin, const double xmax, const long nx, long * restrict count)
@@ -412,11 +422,12 @@ static int _hist1d_base_unroll_4(double * restrict x, const long n, const double
         x+= unroll_fac;        
     }
 
+    int ret;
     if(i < n) {
-        int ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
     }
 
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 #undef UPDATEHIST
@@ -470,8 +481,9 @@ static int _hist1d_base_unroll_4_indp_hist(double * restrict x, const long n, co
         x += unroll_fac;
     }
 
+    int ret = EXIT_SUCCESS;
     if(i < n) {
-        int ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
+        ret = _hist1d_base(x, n-i, xmin, xmax, nx, count);
     }
 
     for(i=0;i<nx;i++) {
@@ -483,7 +495,7 @@ static int _hist1d_base_unroll_4_indp_hist(double * restrict x, const long n, co
     FREEHIST(2);
     FREEHIST(3);
     
-    return EXIT_SUCCESS;
+    return ret;
 }
 
 static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
@@ -549,6 +561,8 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
     /* Build the output array */
     dims[0] = nx;
     count_array = PyArray_SimpleNew(1, dims, NPY_INT64);
+
+
     if (count_array == NULL) {
         PyErr_SetString(PyExc_TypeError, "Couldn't build output array");
         Py_DECREF(x_array);
@@ -564,11 +578,20 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
     count = (long*)PyArray_DATA(count_array);
 
     long *goodhist = calloc(nx, sizeof(*goodhist));
-    assert(goodhist != NULL);
+    if( goodhist == NULL) {
+        PyErr_SetString(PyExc_TypeError, "Couldn't build test array");
+        Py_XDECREF(count_array);
+        Py_XDECREF(goodhist);
+        return NULL;
+    }
 
     volatile int ret = _hist1d_base(x, n, xmin, xmax, nx, goodhist);
+    if( ret != EXIT_SUCCESS) {
+        PyErr_SetString(PyExc_TypeError, "Couldn't compute histogram");
+        Py_XDECREF(count_array);
+        return NULL;
+    }
 
-#define ADD_DIFF_TIME(t0, t1)  (t1.tv_sec - t0.tv_sec) + 1e-6*(t1.tv_usec - t0.tv_usec) 
     
     /* Now call the actual function based on the 'key' passed */
     long i;
@@ -586,7 +609,14 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
         }
 
         int pass=0;
-        volatile int ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
+        ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
+        if( ret != EXIT_SUCCESS) {
+            PyErr_SetString(PyExc_TypeError, "Couldn't compute histogram");
+            Py_XDECREF(count_array);
+            Py_XDECREF(goodhist);
+            return NULL;
+        }
+        
         int failedbin=0;
         for(i=0;i<nx;i++) {
             if(goodhist[i] != count[i]) {
@@ -600,19 +630,19 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
             pass = 1;
         }
 
-        pass=1;
         if(pass == 1) {
             for(k=0;k<maxtries;k++) {
-                struct timeval t0;
+                struct timeval t0, t1;
                 gettimeofday(&t0, NULL);
-                volatile int ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
-                struct timeval t1;
+                ret = (allfunctions[j])(x, n, xmin, xmax, nx, count);
                 gettimeofday(&t1, NULL);
-                if(ret != EXIT_SUCCESS) {
+                if( ret != EXIT_SUCCESS) {
                     PyErr_SetString(PyExc_TypeError, "Couldn't compute histogram");
-                    Py_DECREF(count_array);
+                    Py_XDECREF(count_array);
+                    Py_XDECREF(goodhist);
                     return NULL;
                 }
+
                 double this_iter_time = ADD_DIFF_TIME(t0, t1);
                 avg_time += this_iter_time;
                 squared_time += (this_iter_time*this_iter_time);
@@ -620,7 +650,7 @@ static PyObject *_histogram1d_wrapper(PyObject *self, PyObject *args)
             }
             avg_time /= maxtries;
             const double sigma_time = sqrt(squared_time/maxtries - avg_time*avg_time); //sigma_x = sqrt( mean(x^2)  - (mean(x))^2)
-            fprintf(stdout, "%-40s   %10d    %14.4lf     %14.4lf     %14.4lf\n", function_names[j], n/1000000, avg_time, sigma_time, best_time);
+            fprintf(stdout, "%-40s   %10ld    %14.4lf     %14.4lf     %14.4lf\n", function_names[j], n/1000000, avg_time, sigma_time, best_time);
         } else {
             fprintf(stderr,"Error: Function = %s output did not match the expected correct output...skipping timing tests\n", function_names[j]);
         }
